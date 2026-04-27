@@ -485,25 +485,32 @@ const KEYS={p:'pneus_estoque',v:'pneus_vendas',c:'pneus_custos',cp:'pneus_cpagar
 let produtos=[],vendas=[],custos=[],cpagar=[],creceber=[],cfg={};
 
 // ---- GOOGLE SHEETS SYNC ----
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbwvu6fqz93f-i3eDuKJIVeuVFn2BYWPBAT8-5CTD4jzmu8Uk19pXk_JaiXGGz6JlFU/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbx3NqJ_kADKceci5CcHiGLtjljBsu-6c8-PQThMlw_AVPLJV17ysxQ21M_glQtwtkk/exec';
 
 async function gasGet(chave){
   try{
-    const r = await fetch(GAS_URL + '?chave=' + encodeURIComponent(chave));
+    const r = await fetch(GAS_URL + '?chave=' + encodeURIComponent(chave), {
+      method:'GET',
+      mode:'cors',
+      redirect:'follow'
+    });
     const txt = await r.text();
-    if(txt === 'null' || !txt) return null;
+    if(!txt || txt.trim()==='null') return null;
     return JSON.parse(txt);
-  }catch(e){ return null; }
+  }catch(e){ console.warn('gasGet erro:', e); return null; }
 }
 
 async function gasSet(chave, valor){
   try{
-    await fetch(GAS_URL, {
+    const r = await fetch(GAS_URL, {
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      mode:'cors',
+      redirect:'follow',
+      headers:{'Content-Type':'text/plain'},
       body: JSON.stringify({chave, valor: JSON.stringify(valor)})
     });
-  }catch(e){}
+    return await r.text();
+  }catch(e){ console.warn('gasSet erro:', e); }
 }
 let editProdutoId=null,editContaId=null,editContaTipo=null;
 const DEFAULT_CFG={
@@ -523,19 +530,14 @@ async function load(){
       gasGet(KEYS.p), gasGet(KEYS.v), gasGet(KEYS.c),
       gasGet(KEYS.cp), gasGet(KEYS.cr), gasGet(KEYS.cfg)
     ]);
-    if(rp)  produtos  = rp;
-    if(rv)  vendas    = rv;
-    if(rc)  custos    = rc;
-    if(rcp) cpagar    = rcp;
-    if(rcr) creceber  = rcr;
-    if(rcfg) cfg      = rcfg; else cfg = JSON.parse(JSON.stringify(DEFAULT_CFG));
-    // Salvar no localStorage como cache offline
-    localStorage.setItem(KEYS.p,  JSON.stringify(produtos));
-    localStorage.setItem(KEYS.v,  JSON.stringify(vendas));
-    localStorage.setItem(KEYS.c,  JSON.stringify(custos));
-    localStorage.setItem(KEYS.cp, JSON.stringify(cpagar));
-    localStorage.setItem(KEYS.cr, JSON.stringify(creceber));
-    localStorage.setItem(KEYS.cfg,JSON.stringify(cfg));
+    // Só atualiza se o Sheets retornou dados válidos (não nulo e não vazio)
+    if(rp  && rp.length  > 0) { produtos  = rp;  localStorage.setItem(KEYS.p,  JSON.stringify(rp)); }
+    if(rv  && rv.length  > 0) { vendas    = rv;  localStorage.setItem(KEYS.v,  JSON.stringify(rv)); }
+    if(rc  && rc.length  > 0) { custos    = rc;  localStorage.setItem(KEYS.c,  JSON.stringify(rc)); }
+    if(rcp && rcp.length > 0) { cpagar    = rcp; localStorage.setItem(KEYS.cp, JSON.stringify(rcp)); }
+    if(rcr && rcr.length > 0) { creceber  = rcr; localStorage.setItem(KEYS.cr, JSON.stringify(rcr)); }
+    if(rcfg && Object.keys(rcfg).length > 0) { cfg = rcfg; localStorage.setItem(KEYS.cfg, JSON.stringify(rcfg)); }
+    else { cfg = JSON.parse(JSON.stringify(DEFAULT_CFG)); }
   } catch(e){
     // Fallback: usar localStorage se offline
     try{const r=localStorage.getItem(KEYS.p);if(r)produtos=JSON.parse(r);}catch(e){}
@@ -1473,19 +1475,34 @@ function importarDados(event){
   if(!file) return;
   if(!confirm('Restaurar backup? Os dados atuais serão substituídos.')) return;
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async e => {
     try {
       const dados = JSON.parse(e.target.result);
-      if(dados.produtos) localStorage.setItem(KEYS.p, JSON.stringify(dados.produtos));
-      if(dados.vendas)   localStorage.setItem(KEYS.v, JSON.stringify(dados.vendas));
-      if(dados.custos)   localStorage.setItem(KEYS.c, JSON.stringify(dados.custos));
-      if(dados.cpagar)   localStorage.setItem(KEYS.cp, JSON.stringify(dados.cpagar));
-      if(dados.creceber) localStorage.setItem(KEYS.cr, JSON.stringify(dados.creceber));
-      if(dados.cfg)      localStorage.setItem(KEYS.cfg, JSON.stringify(dados.cfg));
-      showAlert('Backup restaurado! Recarregando...');
-      setTimeout(()=>location.reload(), 1200);
+      // Proteção: só restaura se tiver dados reais
+      if(!dados.produtos && !dados.vendas){
+        showAlert('Backup vazio ou inválido.', 'danger'); return;
+      }
+      // Salvar no localStorage
+      if(dados.produtos && dados.produtos.length >= 0) localStorage.setItem(KEYS.p, JSON.stringify(dados.produtos));
+      if(dados.vendas   && dados.vendas.length   >= 0) localStorage.setItem(KEYS.v, JSON.stringify(dados.vendas));
+      if(dados.custos   && dados.custos.length   >= 0) localStorage.setItem(KEYS.c, JSON.stringify(dados.custos));
+      if(dados.cpagar   && dados.cpagar.length   >= 0) localStorage.setItem(KEYS.cp, JSON.stringify(dados.cpagar));
+      if(dados.creceber && dados.creceber.length >= 0) localStorage.setItem(KEYS.cr, JSON.stringify(dados.creceber));
+      if(dados.cfg) localStorage.setItem(KEYS.cfg, JSON.stringify(dados.cfg));
+      // Sincronizar com Google Sheets
+      showAlert('Restaurando e sincronizando com a nuvem...');
+      await Promise.all([
+        gasSet(KEYS.p,  dados.produtos  || []),
+        gasSet(KEYS.v,  dados.vendas    || []),
+        gasSet(KEYS.c,  dados.custos    || []),
+        gasSet(KEYS.cp, dados.cpagar    || []),
+        gasSet(KEYS.cr, dados.creceber  || []),
+        gasSet(KEYS.cfg,dados.cfg       || {})
+      ]);
+      showAlert('Backup restaurado e sincronizado! Recarregando...');
+      setTimeout(()=>location.reload(), 1500);
     } catch(err){
-      showAlert('Arquivo inválido.', 'danger');
+      showAlert('Arquivo inválido: ' + err.message, 'danger');
     }
   };
   reader.readAsText(file);
