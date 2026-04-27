@@ -150,6 +150,15 @@ input[type=file]{padding:4px}
   <button onclick="goTo('config',this)">Impostos e Taxas</button>
   <button onclick="goTo('relatorio',this)">Relatório</button>
 </div>
+
+<!-- BARRA DE BACKUP / LOGOUT -->
+<div style="display:flex;gap:8px;align-items:center;margin-bottom:1rem;flex-wrap:wrap">
+  <button class="btn" onclick="exportarDados()" style="background:#1a7a3e;color:#fff;border-color:transparent;font-size:12px">💾 Exportar backup</button>
+  <button class="btn" onclick="document.getElementById('import-input').click()" style="font-size:12px">📂 Restaurar backup</button>
+  <input type="file" id="import-input" accept=".json" style="display:none" onchange="importarDados(event)">
+  <button class="btn" onclick="fazerLogout()" style="color:#b91c1c;font-size:12px;margin-left:auto">🔒 Sair</button>
+</div>
+
 <div id="alert-box" class="alert"></div>
 
 <!-- DASHBOARD -->
@@ -1346,7 +1355,7 @@ function gerarPDFEstoque(){
 // ---- SENHA ----
 const SENHA_KEY = 'pneus_senha';
 const SESSION_KEY = 'pneus_logado';
-const SENHA_PADRAO = '1234'; // Altere aqui para sua senha
+const SENHA_PADRAO = '042873'; // Altere aqui para sua senha
 
 function tentarLogin(){
   const input = document.getElementById('login-input').value;
