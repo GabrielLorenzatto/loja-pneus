@@ -483,32 +483,92 @@ input[type=file]{padding:4px}
 <script>
 const KEYS={p:'pneus_estoque',v:'pneus_vendas',c:'pneus_custos',cp:'pneus_cpagar',cr:'pneus_creceber',cfg:'pneus_config'};
 let produtos=[],vendas=[],custos=[],cpagar=[],creceber=[],cfg={};
+
+// ---- GOOGLE SHEETS SYNC ----
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbwvu6fqz93f-i3eDuKJIVeuVFn2BYWPBAT8-5CTD4jzmu8Uk19pXk_JaiXGGz6JlFU/exec';
+
+async function gasGet(chave){
+  try{
+    const r = await fetch(GAS_URL + '?chave=' + encodeURIComponent(chave));
+    const txt = await r.text();
+    if(txt === 'null' || !txt) return null;
+    return JSON.parse(txt);
+  }catch(e){ return null; }
+}
+
+async function gasSet(chave, valor){
+  try{
+    await fetch(GAS_URL, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({chave, valor: JSON.stringify(valor)})
+    });
+  }catch(e){}
+}
 let editProdutoId=null,editContaId=null,editContaTipo=null;
 const DEFAULT_CFG={
   cartao:{'Dinheiro':0,'PIX':0,'Cartão débito':1.5,'Cartão crédito 1x':2.0,'Cartão crédito 2x':2.5,'Cartão crédito 3x':3.0,'Cartão crédito 4x+':3.5,'Boleto':0},
   imposto:{'Simples Nacional':6.0,'ICMS':0,'ISS':0,'Outros impostos':0}
 };
 
-function load(){
+async function load(){
   verificarLogin();
-  try{const r=localStorage.getItem(KEYS.p);if(r)produtos=JSON.parse(r);}catch(e){}
-  try{const r=localStorage.getItem(KEYS.v);if(r)vendas=JSON.parse(r);}catch(e){}
-  try{const r=localStorage.getItem(KEYS.c);if(r)custos=JSON.parse(r);}catch(e){}
-  try{const r=localStorage.getItem(KEYS.cp);if(r)cpagar=JSON.parse(r);}catch(e){}
-  try{const r=localStorage.getItem(KEYS.cr);if(r)creceber=JSON.parse(r);}catch(e){}
-  try{const r=localStorage.getItem(KEYS.cfg);if(r)cfg=JSON.parse(r);else cfg=JSON.parse(JSON.stringify(DEFAULT_CFG));}catch(e){cfg=JSON.parse(JSON.stringify(DEFAULT_CFG));}
+  // Mostrar loading
+  document.getElementById('alert-box').className='alert alert-success show';
+  document.getElementById('alert-box').textContent='🔄 Carregando dados...';
+
+  // Tentar carregar do Google Sheets
+  try{
+    const [rp,rv,rc,rcp,rcr,rcfg] = await Promise.all([
+      gasGet(KEYS.p), gasGet(KEYS.v), gasGet(KEYS.c),
+      gasGet(KEYS.cp), gasGet(KEYS.cr), gasGet(KEYS.cfg)
+    ]);
+    if(rp)  produtos  = rp;
+    if(rv)  vendas    = rv;
+    if(rc)  custos    = rc;
+    if(rcp) cpagar    = rcp;
+    if(rcr) creceber  = rcr;
+    if(rcfg) cfg      = rcfg; else cfg = JSON.parse(JSON.stringify(DEFAULT_CFG));
+    // Salvar no localStorage como cache offline
+    localStorage.setItem(KEYS.p,  JSON.stringify(produtos));
+    localStorage.setItem(KEYS.v,  JSON.stringify(vendas));
+    localStorage.setItem(KEYS.c,  JSON.stringify(custos));
+    localStorage.setItem(KEYS.cp, JSON.stringify(cpagar));
+    localStorage.setItem(KEYS.cr, JSON.stringify(creceber));
+    localStorage.setItem(KEYS.cfg,JSON.stringify(cfg));
+  } catch(e){
+    // Fallback: usar localStorage se offline
+    try{const r=localStorage.getItem(KEYS.p);if(r)produtos=JSON.parse(r);}catch(e){}
+    try{const r=localStorage.getItem(KEYS.v);if(r)vendas=JSON.parse(r);}catch(e){}
+    try{const r=localStorage.getItem(KEYS.c);if(r)custos=JSON.parse(r);}catch(e){}
+    try{const r=localStorage.getItem(KEYS.cp);if(r)cpagar=JSON.parse(r);}catch(e){}
+    try{const r=localStorage.getItem(KEYS.cr);if(r)creceber=JSON.parse(r);}catch(e){}
+    try{const r=localStorage.getItem(KEYS.cfg);if(r)cfg=JSON.parse(r);else cfg=JSON.parse(JSON.stringify(DEFAULT_CFG));}catch(e){cfg=JSON.parse(JSON.stringify(DEFAULT_CFG));}
+  }
+
+  document.getElementById('alert-box').className='alert';
   const hoje=new Date().toISOString().split('T')[0];
   ['v-data','c-data','cp-venc','cr-venc'].forEach(id=>{try{document.getElementById(id).value=hoje;}catch(e){}});
   populateFiltros();renderAll();
 }
 
 function save(){
-  localStorage.setItem(KEYS.p,JSON.stringify(produtos));
-  localStorage.setItem(KEYS.v,JSON.stringify(vendas));
-  localStorage.setItem(KEYS.c,JSON.stringify(custos));
-  localStorage.setItem(KEYS.cp,JSON.stringify(cpagar));
-  localStorage.setItem(KEYS.cr,JSON.stringify(creceber));
+  // Salvar no localStorage imediatamente (cache offline)
+  localStorage.setItem(KEYS.p,  JSON.stringify(produtos));
+  localStorage.setItem(KEYS.v,  JSON.stringify(vendas));
+  localStorage.setItem(KEYS.c,  JSON.stringify(custos));
+  localStorage.setItem(KEYS.cp, JSON.stringify(cpagar));
+  localStorage.setItem(KEYS.cr, JSON.stringify(creceber));
   localStorage.setItem(KEYS.cfg,JSON.stringify(cfg));
+  // Sincronizar com Google Sheets em background
+  Promise.all([
+    gasSet(KEYS.p,  produtos),
+    gasSet(KEYS.v,  vendas),
+    gasSet(KEYS.c,  custos),
+    gasSet(KEYS.cp, cpagar),
+    gasSet(KEYS.cr, creceber),
+    gasSet(KEYS.cfg,cfg)
+  ]).catch(()=>{});
 }
 
 function fmt(v){return'R$ '+parseFloat(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
